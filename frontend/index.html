@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+
+<body class="bg-gray-100">
+
+<div class="max-w-7xl mx-auto p-6">
+
+<h1 class="text-3xl font-bold mb-4">Research Explorer</h1>
+
+<div class="flex gap-2 mb-6">
+<input id="topic" class="border p-2 w-full" placeholder="Search research topic">
+<button onclick="start()" class="bg-blue-600 text-white px-4 py-2 rounded">Run</button>
+</div>
+
+<div id="status" class="mb-4 text-sm"></div>
+<div id="graph-status" class="mb-2 text-sm text-gray-600"></div>
+<div id="selected-nodes" class="mb-4 text-sm"></div>
+
+<div class="grid grid-cols-3 gap-4">
+
+<div class="col-span-2 bg-white p-4 rounded shadow">
+
+<select id="runs" onchange="loadRun()" class="border p-2 mb-4 w-full"></select>
+
+<div id="graph" style="height:700px;border:1px solid #ccc;"></div>
+
+</div>
+
+<div class="bg-white p-4 rounded shadow">
+
+<h2 id="paper-title" class="font-bold mb-2"></h2>
+
+<div class="flex gap-2 mb-3">
+<button onclick="selectAllNodes()" class="bg-indigo-600 text-white px-3 py-1 rounded text-xs">Select all</button>
+<button onclick="clearNodeSelection()" class="bg-gray-600 text-white px-3 py-1 rounded text-xs">Clear</button>
+</div>
+
+<textarea id="question" class="border w-full p-2" placeholder="Ask question"></textarea>
+
+<button id="ask-btn" onclick="askPaper()" class="bg-green-600 text-white px-4 py-2 mt-2 rounded">
+Ask
+</button>
+
+<div id="answer" class="mt-4 text-sm"></div>
+
+</div>
+
+</div>
+
+</div>
+
+<script src="/frontend/graph.js"></script>
+
+<script>
+
+function formatAnswer(text){
+    if(!text) return "<i>No answer</i>"
+    return marked.parse(text)
+}
+
+async function start(){
+    const topic = document.getElementById("topic").value
+    await fetch("/run_pipeline?topic="+encodeURIComponent(topic),{method:"POST"})
+    waitForCompletion()
+}
+
+async function waitForCompletion(){
+    const interval = setInterval(async () => {
+
+        const r = await fetch("/status")
+        const data = await r.json()
+
+        document.getElementById("status").innerText =
+        data.step + " : " + data.message
+
+        if(data.step === "complete"){
+            clearInterval(interval)
+            await loadRuns()
+            await loadRun()
+        }
+
+    },1000)
+}
+
+async function askPaper(){
+
+    const btn = document.getElementById("ask-btn")
+    const answerEl = document.getElementById("answer")
+
+    const q = document.getElementById("question").value
+    const selected = Array.from(window.selectedNodes || [])
+
+    btn.disabled = true
+    btn.innerText = "Answering..."
+
+    answerEl.innerHTML = "<i>Thinking...</i>"
+
+    try{
+
+        const res = await fetch("/ask", {
+            method: "POST",
+            headers: {"Content-Type":"application/json"},
+            body: JSON.stringify({
+                question: q,
+                paper_ids: selected
+            })
+        })
+
+        const data = await res.json()
+
+        if(data.error){
+            answerEl.innerHTML = "<b style='color:red'>" + data.error + "</b>"
+        } else {
+
+            let html = ""
+
+            // 🔥 ANSWER BLOCK (clean + boundary)
+            html += `
+                <div style="
+                    border-bottom:2px solid #ddd;
+                    padding-bottom:10px;
+                    margin-bottom:15px;
+                ">
+                    ${formatAnswer(data.answer)}
+                </div>
+            `
+
+            // 🔥 CHUNK COUNT AFTER ANSWER
+            html += `<b>Chunks used:</b> ${data.chunks_used}<br><br>`
+
+            // 🔥 ALL CHUNKS IN ONE COLLAPSIBLE BLOCK
+            html += `
+                <details>
+                    <summary style="cursor:pointer;font-weight:bold">
+                        View Retrieved Chunks
+                    </summary>
+                    <div style="
+                        margin-top:10px;
+                        padding:10px;
+                        background:#f8fafc;
+                        border:1px solid #ddd;
+                        max-height:300px;
+                        overflow:auto;
+                        font-size:12px;
+                        line-height:1.5;
+                    ">
+                        ${data.chunks.map((c,i)=>`
+                            <div style="margin-bottom:10px">
+                                <b>Chunk ${i+1}:</b><br>
+                                ${c}
+                            </div>
+                        `).join("")}
+                    </div>
+                </details>
+            `
+
+            answerEl.innerHTML = html
+
+            // highlight nodes
+            highlightNodes(data.source_papers)
+        }
+
+    } catch(err){
+        answerEl.innerHTML = "<b style='color:red'>Request failed</b>"
+    }
+
+    btn.disabled = false
+    btn.innerText = "Ask"
+}
+
+async function loadRuns(){
+    const res = await fetch("/runs")
+    const runs = await res.json()
+    const select = document.getElementById("runs")
+
+    select.innerHTML = ""
+
+    runs.forEach(r=>{
+        const o = document.createElement("option")
+        o.value = r.id
+        o.innerText = r.label
+        select.appendChild(o)
+    })
+
+    if(runs.length>0){
+        select.value = runs[runs.length-1].id
+    }
+}
+
+async function loadRun(){
+    const run = document.getElementById("runs").value
+    await fetch("/load_run?run_id="+run,{method:"POST"})
+    renderGraph()
+}
+
+loadRuns().then(loadRun)
+
+</script>
+
+</body>
+</html>

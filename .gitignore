@@ -1,0 +1,39 @@
+# ── Python ─────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+
+# ── Env / secrets ─────────────────────────────
+.env
+.env.*
+*.env
+
+# ── Virtual environments ──────────────────────
+venv/
+env/
+.venv/
+
+# ── Runtime generated data ────────────────────
+runs/
+outputs/
+data/
+*.log
+
+# ── OS junk ───────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDE ──────────────────────────────────────
+.vscode/
+.idea/
+
+# ── Node (frontend tooling if any later) ─────
+node_modules/
+dist/
+build/
+
+# ── Misc ─────────────────────────────────────
+*.tmp
+*.bak

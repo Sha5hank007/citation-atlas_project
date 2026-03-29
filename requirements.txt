@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+requests
+python-dotenv
+networkx
+pymupdf
+tqdm
+chromadb
+sentence-transformers
