@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html>
-
 <head>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
@@ -8,84 +7,82 @@
 </head>
 
 <body class="bg-gray-100">
-
 <div class="max-w-7xl mx-auto p-6">
 
-<h1 class="text-3xl font-bold mb-4">Research Explorer</h1>
+  <h1 class="text-3xl font-bold mb-4">Research Explorer</h1>
 
-<div class="flex gap-2 mb-6">
-<input id="topic" class="border p-2 w-full" placeholder="Search research topic">
-<button onclick="start()" class="bg-blue-600 text-white px-4 py-2 rounded">Run</button>
-</div>
+  <div class="flex gap-2 mb-6">
+    <input id="topic" class="border p-2 w-full" placeholder="Search research topic">
+    <button onclick="start()" class="bg-blue-600 text-white px-4 py-2 rounded">Run</button>
+  </div>
 
-<div id="status" class="mb-4 text-sm"></div>
-<div id="graph-status" class="mb-2 text-sm text-gray-600"></div>
-<div id="selected-nodes" class="mb-4 text-sm"></div>
+  <div id="status" class="mb-4 text-sm font-mono bg-gray-800 text-green-400 p-3 rounded"
+       style="min-height:40px;display:none;max-height:150px;overflow:auto"></div>
 
-<div class="grid grid-cols-3 gap-4">
+  <div id="selected-nodes" class="mb-4 text-sm"
+     style="max-height:120px; overflow-y:auto;"></div>
 
-<div class="col-span-2 bg-white p-4 rounded shadow">
+  <div class="text-xs text-gray-600 mb-2">
+    Only <b>selected papers</b> are used for answering.<br>
+    <span style="color:#FFD700">● Gold ring</span> = answer sources
+  </div>   
 
-<select id="runs" onchange="loadRun()" class="border p-2 mb-4 w-full"></select>
+  <div class="grid grid-cols-3 gap-4">
 
-<div id="graph" style="height:700px;border:1px solid #ccc;"></div>
+    <div class="col-span-2 bg-white p-4 rounded shadow">
+      <select id="runs" onchange="loadRun()" class="border p-2 mb-4 w-full"></select>
+      <div id="graph" style="height:650px; width:100%; border:1px solid #ccc; position:relative;"></div>
+    </div>
 
-</div>
+    <div class="bg-white p-4 rounded shadow overflow-auto" style="max-height:750px">
+      <div class="flex gap-2 mb-3">
+        <button onclick="selectAllNodes()" class="bg-indigo-600 text-white px-3 py-1 rounded text-xs">Select all</button>
+        <button onclick="clearNodeSelection()" class="bg-gray-600 text-white px-3 py-1 rounded text-xs">Clear</button>
+      </div>
+      <textarea id="question" class="border w-full p-2" rows="3" placeholder="Ask a question about selected papers"></textarea>
+      <button id="ask-btn" onclick="askPaper()" class="bg-green-600 text-white px-4 py-2 mt-2 rounded w-full">Ask</button>
+      <div id="answer" class="mt-4 text-sm"></div>
+    </div>
 
-<div class="bg-white p-4 rounded shadow">
-
-<h2 id="paper-title" class="font-bold mb-2"></h2>
-
-<div class="flex gap-2 mb-3">
-<button onclick="selectAllNodes()" class="bg-indigo-600 text-white px-3 py-1 rounded text-xs">Select all</button>
-<button onclick="clearNodeSelection()" class="bg-gray-600 text-white px-3 py-1 rounded text-xs">Clear</button>
-</div>
-
-<textarea id="question" class="border w-full p-2" placeholder="Ask question"></textarea>
-
-<button id="ask-btn" onclick="askPaper()" class="bg-green-600 text-white px-4 py-2 mt-2 rounded">
-Ask
-</button>
-
-<div id="answer" class="mt-4 text-sm"></div>
-
-</div>
-
-</div>
-
+  </div>
 </div>
 
 <script src="/frontend/graph.js"></script>
 
 <script>
-
 function formatAnswer(text){
-    if(!text) return "<i>No answer</i>"
-    return marked.parse(text)
+  if(!text) return "<i>No answer</i>"
+  return marked.parse(text)
 }
 
 async function start(){
-    const topic = document.getElementById("topic").value
-    await fetch("/run_pipeline?topic="+encodeURIComponent(topic),{method:"POST"})
-    waitForCompletion()
+  const topic = document.getElementById("topic").value
+  if(!topic.trim()) return
+  const statusEl = document.getElementById("status")
+  statusEl.style.display = "block"
+  statusEl.innerHTML = ""
+  await fetch("/run_pipeline?topic="+encodeURIComponent(topic), {method:"POST"})
+  waitForCompletion()
 }
 
 async function waitForCompletion(){
-    const interval = setInterval(async () => {
-
-        const r = await fetch("/status")
-        const data = await r.json()
-
-        document.getElementById("status").innerText =
-        data.step + " : " + data.message
-
-        if(data.step === "complete"){
-            clearInterval(interval)
-            await loadRuns()
-            await loadRun()
-        }
-
-    },1000)
+  const statusEl = document.getElementById("status")
+  const interval = setInterval(async () => {
+    const r    = await fetch("/status")
+    const data = await r.json()
+    statusEl.innerHTML += `<div>▶ ${data.message}</div>`
+    statusEl.scrollTop  = statusEl.scrollHeight
+    if(data.step === "complete"){
+      clearInterval(interval)
+      statusEl.innerHTML += `<div style="color:#4ade80">✓ Done</div>`
+      await loadRuns()
+      await loadRun()
+    }
+    if(data.step === "error"){
+      clearInterval(interval)
+      statusEl.innerHTML += `<div style="color:#f87171">✗ ${data.message}</div>`
+    }
+  }, 1000)
 }
 
 async function askPaper(){
@@ -93,7 +90,13 @@ async function askPaper(){
     const btn = document.getElementById("ask-btn")
     const answerEl = document.getElementById("answer")
 
-    const q = document.getElementById("question").value
+    const question = document.getElementById("question").value.trim()
+
+    if (!question) {
+        answerEl.innerHTML = "<b style='color:red'>Enter a question</b>"
+        return
+    }
+
     const selected = Array.from(window.selectedNodes || [])
 
     btn.disabled = true
@@ -107,7 +110,7 @@ async function askPaper(){
             method: "POST",
             headers: {"Content-Type":"application/json"},
             body: JSON.stringify({
-                question: q,
+                question: question,
                 paper_ids: selected
             })
         })
@@ -118,52 +121,30 @@ async function askPaper(){
             answerEl.innerHTML = "<b style='color:red'>" + data.error + "</b>"
         } else {
 
-            let html = ""
-
-            // 🔥 ANSWER BLOCK (clean + boundary)
-            html += `
-                <div style="
-                    border-bottom:2px solid #ddd;
-                    padding-bottom:10px;
-                    margin-bottom:15px;
-                ">
-                    ${formatAnswer(data.answer)}
-                </div>
+            let html = `
+              <div style="border-bottom:2px solid #ddd;padding-bottom:10px;margin-bottom:10px">
+                ${marked.parse(data.answer)}
+              </div>
             `
 
-            // 🔥 CHUNK COUNT AFTER ANSWER
             html += `<b>Chunks used:</b> ${data.chunks_used}<br><br>`
 
-            // 🔥 ALL CHUNKS IN ONE COLLAPSIBLE BLOCK
             html += `
-                <details>
-                    <summary style="cursor:pointer;font-weight:bold">
-                        View Retrieved Chunks
-                    </summary>
-                    <div style="
-                        margin-top:10px;
-                        padding:10px;
-                        background:#f8fafc;
-                        border:1px solid #ddd;
-                        max-height:300px;
-                        overflow:auto;
-                        font-size:12px;
-                        line-height:1.5;
-                    ">
-                        ${data.chunks.map((c,i)=>`
-                            <div style="margin-bottom:10px">
-                                <b>Chunk ${i+1}:</b><br>
-                                ${c}
-                            </div>
-                        `).join("")}
-                    </div>
-                </details>
+              <details>
+                <summary>View Retrieved Chunks</summary>
+                <div style="max-height:300px;overflow:auto;font-size:12px">
+                  ${data.chunks.map((c,i)=>`
+                    <div><b>Chunk ${i+1}:</b><br>${c}</div>
+                  `).join("")}
+                </div>
+              </details>
             `
 
             answerEl.innerHTML = html
 
-            // highlight nodes
-            highlightNodes(data.source_papers)
+            if (data.source_papers) {
+                highlightNodes(data.source_papers)
+            }
         }
 
     } catch(err){
@@ -175,32 +156,27 @@ async function askPaper(){
 }
 
 async function loadRuns(){
-    const res = await fetch("/runs")
-    const runs = await res.json()
-    const select = document.getElementById("runs")
-
-    select.innerHTML = ""
-
-    runs.forEach(r=>{
-        const o = document.createElement("option")
-        o.value = r.id
-        o.innerText = r.label
-        select.appendChild(o)
-    })
-
-    if(runs.length>0){
-        select.value = runs[runs.length-1].id
-    }
+  const res    = await fetch("/runs")
+  const runs   = await res.json()
+  const select = document.getElementById("runs")
+  select.innerHTML = ""
+  runs.forEach(r => {
+    const o    = document.createElement("option")
+    o.value    = r.id
+    o.innerText = r.label
+    select.appendChild(o)
+  })
+  if(runs.length > 0) select.value = runs[0].id  // ← first = newest (sorted desc)
 }
 
 async function loadRun(){
-    const run = document.getElementById("runs").value
-    await fetch("/load_run?run_id="+run,{method:"POST"})
-    renderGraph()
+  const run = document.getElementById("runs").value
+  if(!run) return
+  await fetch("/load_run?run_id="+run, {method:"POST"})
+  renderGraph()
 }
 
 loadRuns().then(loadRun)
-
 </script>
 
 </body>

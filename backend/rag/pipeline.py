@@ -6,6 +6,7 @@ except ImportError:
 import chromadb
 from sentence_transformers import SentenceTransformer
 
+fitz.TOOLS.mupdf_display_errors(False)
 
 model = SentenceTransformer("all-MiniLM-L6-v2")
 

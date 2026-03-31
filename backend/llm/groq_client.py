@@ -20,8 +20,23 @@ class GroqClient:
             ]
         }
 
-        r = requests.post(url, headers=headers, json=payload)
+        try:
+            r = requests.post(url, headers=headers, json=payload, timeout=20)
 
-        data = r.json()
+            # 🔥 handle HTTP errors
+            if r.status_code != 200:
+                print("LLM HTTP ERROR:", r.status_code, r.text)
+                return ""
 
-        return data["choices"][0]["message"]["content"]
+            data = r.json()
+
+            # handle missing "choices"
+            if "choices" not in data:
+                print("LLM ERROR RESPONSE:", data)
+                return ""
+
+            return data["choices"][0]["message"]["content"]
+
+        except Exception as e:
+            print("LLM REQUEST FAILED:", str(e))
+            return ""

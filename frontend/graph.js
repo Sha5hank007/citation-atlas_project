@@ -1,288 +1,432 @@
-// graph.js
+let selectedIds    = new Set();
+let highlightedIds = new Set();
+let nodesSelection, linksSelection, labelsSelection;
+let graphLinks = [];
 
-let selectedIds = new Set();
-let nodeR = 9;
-let labelLen = 28;
-let colorMode = "role";
+window.addEventListener("keydown", e => { if (e.key === "Shift") ;  });
+window.addEventListener("keyup",   e => { if (e.key === "Shift") ; });
 
-const ROLE_COLOR = {
-  landmark:  { fill:"#534AB7", stroke:"#3C3489" },
-  seed:      { fill:"#0F6E56", stroke:"#085041" },
-  bridge:    { fill:"#BA7517", stroke:"#854F0B" },
-  important: { fill:"#185FA5", stroke:"#0C447C" },
-  peripheral:{ fill:"#888780", stroke:"#5F5E5A" },
-};
-
-let yearColorScale;
-
-// ── shift key tracking (kept but no longer required) ──────────────────────
-window._shiftHeld = false;
-window.addEventListener("keydown", e => { if (e.key === "Shift") window._shiftHeld = true; });
-window.addEventListener("keyup",   e => { if (e.key === "Shift") window._shiftHeld = false; });
-
-function getColor(d) {
-  if (colorMode === "year") return yearColorScale(d.year);
-  return ROLE_COLOR[d.role]?.fill || "#888";
-}
-function getStroke(d) {
-  if (colorMode === "year") return d3.color(yearColorScale(d.year)).darker(0.8).toString();
-  return ROLE_COLOR[d.role]?.stroke || "#555";
+function getBaseColor(d) {
+  const map = {
+    landmark:   "#1e3a8a",
+    important:  "#2563eb",
+    bridge:     "#60a5fa",
+    recent:     "#f97316",
+    peripheral: "#9ca3af",
+    seed:       "#2563eb",
+    reference:  "#9ca3af",
+  };
+  return map[d.role] || "#3b82f6";
 }
 
 function renderGraph() {
   const container = document.getElementById("graph");
-  const w = container.clientWidth || 960;
-  const H = 520;
+  const W = container.clientWidth  || 900;
+  const H = container.clientHeight || 700;
 
   d3.select("#graph").selectAll("*").remove();
 
   const svg = d3.select("#graph")
     .append("svg")
-    .attr("width", w)
+    .attr("width",  W)
     .attr("height", H);
+
+  // ── arrow markers — one for each end ──────────────────────────────
+  const defs = svg.append("defs");
+
+  defs.append("marker")
+    .attr("id",           "arrow-out")
+    .attr("viewBox",      "0 -4 8 8")
+    .attr("refX",         8)
+    .attr("markerWidth",  6)
+    .attr("markerHeight", 6)
+    .attr("orient",       "auto")
+    .append("path")
+    .attr("d",    "M0,-4L8,0L0,4")
+    .attr("fill", "#111");
+
+  defs.append("marker")
+    .attr("id",           "arrow-in")
+    .attr("viewBox",      "0 -4 8 8")
+    .attr("refX",         8)
+    .attr("markerWidth",  6)
+    .attr("markerHeight", 6)
+    .attr("orient",       "auto")
+    .append("path")
+    .attr("d",    "M0,-4L8,0L0,4")
+    .attr("fill", "#111");
+
+  const g = svg.append("g");
+
+  svg.call(
+    d3.zoom()
+      .scaleExtent([0.3, 4])
+      .on("zoom", e => g.attr("transform", e.transform))
+  );
+
+  let tooltip = document.getElementById("tooltip");
+  if (!tooltip) {
+    tooltip = document.createElement("div");
+    tooltip.id = "tooltip";
+    tooltip.style.cssText = [
+      "position:absolute","background:white","border:1px solid #ccc",
+      "padding:8px 12px","font-size:12px","pointer-events:none","opacity:0",
+      "max-width:240px","line-height:1.6","border-radius:6px",
+      "box-shadow:0 2px 8px rgba(0,0,0,0.1)"
+    ].join(";");
+    container.style.position = "relative";
+    container.appendChild(tooltip);
+  }
 
   d3.json("/graph").then(data => {
 
-    const PAPERS = data.nodes;
-    const EDGES  = data.links || [];
+    const nodes = data.nodes || [];
+    const links = data.links || [];
+    graphLinks  = links;
 
-    if (!PAPERS || PAPERS.length === 0) {
+    if (nodes.length === 0) {
       svg.append("text")
-        .attr("x", w / 2).attr("y", H / 2)
+        .attr("x", W / 2).attr("y", H / 2)
         .attr("text-anchor", "middle")
         .style("font-size", "14px")
         .style("fill", "#888")
-        .text("No papers in graph yet — run a search first");
+        .text("No papers yet — run a search first");
       return;
     }
 
-    PAPERS.forEach(d => { d.year = +d.year || 2020; });
+    window.nodeDataById = Object.fromEntries(nodes.map(n => [n.id, n]));
 
-    window.nodeDataById = Object.fromEntries(PAPERS.map(d => [d.id, d]));
+    const maxCitations = d3.max(nodes, d => d.citations || 0) || 1;
 
-    const years = [...new Set(PAPERS.map(d => d.year))].sort();
-    yearColorScale = d3.scaleOrdinal()
-      .domain(years)
-      .range(["#534AB7","#185FA5","#0F6E56","#BA7517","#D4537E"]);
+    const rScale = d3.scalePow()
+      .exponent(0.3)
+      .domain([1, maxCitations])
+      .range([5, 28]);
 
-    const defs = svg.append("defs");
-    defs.append("marker")
-      .attr("id", "arrow")
-      .attr("viewBox", "0 -4 8 8")
-      .attr("refX", 8)
-      .attr("markerWidth", 6)
-      .attr("markerHeight", 6)
-      .attr("orient", "auto")
-      .append("path")
-      .attr("d", "M0,-4L8,0L0,4")
-      .attr("fill", "#B4B2A9");
-
-    const margin = { top:28, right:60, bottom:40, left:60 };
-    const innerW  = w - margin.left - margin.right;
-    const innerH  = H - margin.top  - margin.bottom;
-
-    const g = svg.append("g")
-      .attr("transform", `translate(${margin.left},${margin.top})`);
-
-    const minYear = d3.min(PAPERS, d => d.year);
-    const maxYear = d3.max(PAPERS, d => d.year);
-    const xScale  = d3.scaleLinear()
-      .domain([minYear, maxYear])
-      .range([0, innerW]);
-
-    const yearGroups = {};
-    PAPERS.forEach(d => {
-      if (!yearGroups[d.year]) yearGroups[d.year] = [];
-      yearGroups[d.year].push(d);
-    });
-    PAPERS.forEach(d => {
-      const grp = yearGroups[d.year];
-      const idx = grp.indexOf(d);
-      const n   = grp.length;
-      d.x = xScale(d.year);
-      d.y = ((idx + 1) / (n + 1)) * innerH;
-    });
-
-    const prExtent = d3.extent(PAPERS, d => d.pagerank || 0.01);
-    const rScale   = d3.scaleLinear()
-      .domain(prExtent)
-      .range([nodeR * 0.6, nodeR * 1.8]);
-
-    const nodeById = window.nodeDataById;
-
-    const edgeData = EDGES.map(e => ({
-      source: e.source?.id ?? e.source,
-      target: e.target?.id ?? e.target,
-    })).filter(e => nodeById[e.source] && nodeById[e.target]);
-
-    g.append("g").selectAll("line")
-      .data(edgeData)
-      .enter()
-      .append("line")
-      .attr("x1", d => nodeById[d.source].x)
-      .attr("y1", d => nodeById[d.source].y)
-      .attr("x2", d => {
-        const src = nodeById[d.source], tgt = nodeById[d.target];
-        const dx = tgt.x - src.x, dy = tgt.y - src.y;
-        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
-        return tgt.x - (dx / dist) * rScale(tgt.pagerank || 0.01);
-      })
-      .attr("y2", d => {
-        const src = nodeById[d.source], tgt = nodeById[d.target];
-        const dx = tgt.x - src.x, dy = tgt.y - src.y;
-        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
-        return tgt.y - (dy / dist) * rScale(tgt.pagerank || 0.01);
-      })
-      .attr("stroke", "#B4B2A9")
-      .attr("stroke-width", 1)
-      .attr("stroke-opacity", 0.5)
-      .attr("marker-end", "url(#arrow)");
-
-    const node = g.append("g").selectAll("g.node")
-      .data(PAPERS)
-      .enter()
-      .append("g")
-      .attr("class", "node")
-      .attr("transform", d => `translate(${d.x},${d.y})`)
-      .style("cursor", "pointer");
-
-    node.append("circle")
-      .attr("r",            d => rScale(d.pagerank || 0.01))
-      .attr("fill",         d => selectedIds.has(d.id) ? "#D85A30" : getColor(d))
-      .attr("stroke",       d => selectedIds.has(d.id) ? "#993C1D" : getStroke(d))
-      .attr("stroke-width", d => selectedIds.has(d.id) ? 2.5 : 1.5);
-
-    node.append("text")
-      .attr("x", d => {
-        const r = rScale(d.pagerank || 0.01);
-        return d.x + r + 5 + 140 > innerW ? -(r + 5) : r + 5;
-      })
-      .attr("y", 4)
-      .attr("text-anchor", d => {
-        const r = rScale(d.pagerank || 0.01);
-        return d.x + r + 5 + 140 > innerW ? "end" : "start";
-      })
-      .text(d => {
-        const t = d.title || "";
-        return t.length > labelLen ? t.slice(0, labelLen) + "…" : t;
-      })
-      .style("font-size", "11px")
-      .style("fill", "#888780")
-      .attr("pointer-events", "none");
-
-    let tooltip = document.getElementById("tooltip");
-    if (!tooltip) {
-      tooltip = document.createElement("div");
-      tooltip.id = "tooltip";
-      tooltip.style.cssText = "position:absolute;background:white;border:1px solid #ccc;" +
-        "border-radius:6px;padding:8px 12px;font-size:12px;pointer-events:none;" +
-        "opacity:0;max-width:220px;z-index:10;line-height:1.6;";
-      container.style.position = "relative";
-      container.appendChild(tooltip);
+    function getRadius(d) {
+      return rScale(Math.max(1, d.citations || 1));
     }
 
-    node
-      .on("mouseenter", function(event, d) {
-        d3.select(this).select("circle").attr("stroke-width", 3);
-        const box = container.getBoundingClientRect();
-        const ex  = event.clientX - box.left;
-        const ey  = event.clientY - box.top;
-        tooltip.innerHTML = `
-          <strong style="display:block;margin-bottom:4px">${d.title}</strong>
-          <span style="color:#666">Year: ${d.year}</span><br>
-          <span style="color:#666">Role: ${d.role || "—"}</span><br>
-          <span style="color:#666">PageRank: ${(d.pagerank || 0).toFixed(3)}</span>
-        `;
-        const left = ex + 14 + 220 > container.clientWidth ? ex - 230 : ex + 14;
-        tooltip.style.left    = left + "px";
-        tooltip.style.top     = (ey - 10) + "px";
-        tooltip.style.opacity = 1;
-      })
-      .on("mouseleave", function(event, d) {
-        d3.select(this).select("circle")
-          .attr("stroke-width", selectedIds.has(d.id) ? 2.5 : 1.5);
-        tooltip.style.opacity = 0;
-      })
-      .on("click", function(event, d) {
+    const minYear = d3.min(nodes, d => d.year || 2000);
+    const maxYear = d3.max(nodes, d => d.year || 2024);
 
-        const circle = d3.select(this).select("circle");
+    const yScale = d3.scaleLinear()
+      .domain([minYear, maxYear])
+      .range([H - 60, 60]);
 
-        if (selectedIds.has(d.id)) {
-          selectedIds.delete(d.id);
-          circle
-            .attr("fill",         getColor(d))
-            .attr("stroke",       getStroke(d))
-            .attr("stroke-width", 1.5);
-        } else {
-          selectedIds.add(d.id);
-          circle
-            .attr("fill",         "#D85A30")
-            .attr("stroke",       "#993C1D")
-            .attr("stroke-width", 2.5);
-        }
+    const simulation = d3.forceSimulation(nodes)
+      .force("link",      d3.forceLink(links).id(d => d.id).distance(120))
+      .force("charge",    d3.forceManyBody().strength(-180))
+      .force("collision", d3.forceCollide().radius(d => getRadius(d) + 10))
+      .force("y",         d3.forceY(d => yScale(d.year || 2020)).strength(0.8))
+      .force("x",         d3.forceX(W / 2).strength(0.05));
 
-        window.selectedNodes = selectedIds;
-        window.currentPaper  = d.id;
-        updateSelectionStatus();
+    // ── edges — use path not line so we can animate + add arrows ──────
+    linksSelection = g.append("g")
+      .selectAll("path")
+      .data(links)
+      .enter()
+      .append("path")
+      .attr("class",        "edge-path")
+      .attr("fill",         "none")
+      .attr("stroke",       "#bbb")
+      .attr("stroke-width", 1)
+      .attr("stroke-opacity", 0.25);
+
+    // ── nodes ─────────────────────────────────────────────────────────
+    nodesSelection = g.append("g")
+      .selectAll("g")
+      .data(nodes)
+      .enter()
+      .append("g")
+      .style("cursor", "pointer")
+      .call(d3.drag()
+        .on("start", (event, d) => {
+          if (!event.active) simulation.alphaTarget(0.3).restart();
+          d.fx = d.x; d.fy = d.y;
+        })
+        .on("drag",  (event, d) => { d.fx = event.x; d.fy = event.y; })
+        .on("end",   (event, d) => {
+          if (!event.active) simulation.alphaTarget(0);
+          d.fx = null; d.fy = null;
+        })
+      );
+
+    nodesSelection.append("circle")
+      .attr("r",            d => getRadius(d))
+      .attr("fill",         d => getBaseColor(d))
+      .attr("stroke",       "#fff")
+      .attr("stroke-width", 1.5);
+
+    const citationThreshold = d3.quantile(
+      nodes.map(d => d.citations || 0).sort(d3.ascending),
+      0.8
+    );
+
+    labelsSelection = nodesSelection.append("text")
+      .attr("y", 4)
+      .style("font-size",     "10px")
+      .style("fill",          "#222")
+      .style("font-weight",   d => (d.citations || 0) >= citationThreshold ? "600" : "400")
+      .attr("pointer-events", "none")
+      .text(d => {
+        if ((d.citations || 0) < citationThreshold) return "";
+        const t = d.title || "";
+        return t.length > 28 ? t.slice(0, 28) + "…" : t;
       });
 
-    g.append("g")
-      .attr("transform", `translate(0,${innerH + 12})`)
-      .call(
-        d3.axisBottom(xScale)
-          .tickFormat(d3.format("d"))
-          .ticks(maxYear - minYear)
-      )
-      .selectAll("text")
-      .style("font-size", "11px");
+    // ── tooltip ───────────────────────────────────────────────────────
+    nodesSelection.on("mouseenter", function(event, d) {
+      const box = container.getBoundingClientRect();
+      const ex  = event.clientX - box.left;
+      const ey  = event.clientY - box.top;
+      tooltip.innerHTML = `
+        <strong style="display:block;margin-bottom:4px">${d.title}</strong>
+        <span style="color:#666">Year: ${d.year || "—"}</span><br>
+        <span style="color:#666">Citations: ${(d.citations || 0).toLocaleString()}</span><br>
+        <span style="color:#666">Role: ${d.role || "—"}</span><br>
+        <span style="color:#666">PageRank: ${(d.pagerank || 0).toFixed(4)}</span>
+      `;
+      tooltip.style.left    = (ex + 14 + 240 > W ? ex - 250 : ex + 14) + "px";
+      tooltip.style.top     = (ey - 10) + "px";
+      tooltip.style.opacity = "1";
 
-    updateSelectionStatus();
+      // ── on hover: show arrows + animate dots on connected edges ──────
+      const hoveredId = d.id;
+
+      // 🔥 dim unrelated nodes
+      const connected = new Set([hoveredId]);
+
+      graphLinks.forEach(l => {
+        const s = l.source?.id ?? l.source;
+        const t = l.target?.id ?? l.target;
+
+        if (s === hoveredId) connected.add(t);
+        if (t === hoveredId) connected.add(s);
+      });
+
+nodesSelection.select("circle")
+  .attr("opacity", n => connected.has(n.id) ? 1 : 0.1);
+
+      linksSelection
+        .attr("stroke-opacity", l => {
+          const s = l.source?.id ?? l.source;
+          const t = l.target?.id ?? l.target;
+          return (s === hoveredId || t === hoveredId) ? 0.9 : 0.05;
+        })
+        .attr("stroke", l => {
+          const s = l.source?.id ?? l.source;
+          const t = l.target?.id ?? l.target;
+          return (s === hoveredId || t === hoveredId) ? "#111" : "#bbb";
+        })
+        .attr("stroke-width", l => {
+          const s = l.source?.id ?? l.source;
+          const t = l.target?.id ?? l.target;
+          return (s === hoveredId || t === hoveredId) ? 2 : 1;
+        })
+        .attr("marker-end", l => {
+          const s = l.source?.id ?? l.source;
+          const t = l.target?.id ?? l.target;
+          return (s === hoveredId || t === hoveredId) ? "url(#arrow-out)" : null;
+        })
+        // animated dash flow — black dots moving along edge
+        .each(function(l) {
+          const s = l.source?.id ?? l.source;
+          const t = l.target?.id ?? l.target;
+          if (s !== hoveredId && t !== hoveredId) return;
+
+          const pathEl   = d3.select(this);
+          const pathLen  = this.getTotalLength();
+          if (!pathLen) return;
+
+          const dashLen  = 4;   // dot size
+          const gapLen   = 12;  // gap between dots
+
+          pathEl
+            .attr("stroke-dasharray",  `${dashLen} ${gapLen}`)
+            .attr("stroke-dashoffset", pathLen)
+            .transition()
+            .duration(2500)
+            .ease(d3.easeLinear)
+            .attr("stroke-dashoffset", 0)
+            .on("end", function repeat() {
+              d3.select(this)
+                .attr("stroke-dashoffset", pathLen)
+                .transition()
+                .duration(2500)
+                .ease(d3.easeLinear)
+                .attr("stroke-dashoffset", 0)
+                .on("end", repeat);
+            });
+        });
+    });
+    
+    // restore node visibility  
+    nodesSelection.on("mouseleave", () => {
+    tooltip.style.opacity = "0";
+
+    // 🔥 restore node opacity FIRST
+    nodesSelection.select("circle")
+      .attr("opacity", 1);
+
+    // reset edges
+    linksSelection
+      .interrupt()
+      .attr("stroke", "#bbb")
+      .attr("stroke-opacity", 0.25)
+      .attr("stroke-width", 1)
+      .attr("stroke-dasharray", null)
+      .attr("marker-end", null);
+
+    // 🔥 CRITICAL: reapply selection state AFTER reset
+    applySelection();
   });
+
+    // ── click ─────────────────────────────────────────────────────────
+    nodesSelection.on("click", function(event, d) {
+
+    // 🔥 simple toggle (no shift needed)
+    if (selectedIds.has(d.id)) {
+      selectedIds.delete(d.id);
+    } else {
+      selectedIds.add(d.id);
+    }
+
+    window.selectedNodes = selectedIds;
+    applySelection();
+  });
+
+    // ── tick ──────────────────────────────────────────────────────────
+    simulation.on("tick", () => {
+      // curved paths using quadratic bezier
+      linksSelection.attr("d", l => {
+        const sx = l.source.x, sy = l.source.y;
+        const tx = l.target.x, ty = l.target.y;
+        const mx = (sx + tx) / 2;
+        const my = (sy + ty) / 2 - 30; // curve upward
+        return `M${sx},${sy} Q${mx},${my} ${tx},${ty}`;
+      });
+
+      nodesSelection.attr("transform", d => `translate(${d.x},${d.y})`);
+
+      labelsSelection
+        .attr("x",           d => d.x < W / 2 ? -(getRadius(d) + 5) : getRadius(d) + 5)
+        .attr("text-anchor", d => d.x < W / 2 ? "end" : "start");
+    });
+
+    applySelection();
+  });
+}
+
+function applySelection() {
+  if (!nodesSelection || !linksSelection) return;
+
+  const connected = new Set(selectedIds);
+
+  if (selectedIds.size > 0) {
+    graphLinks.forEach(l => {
+      const s = l.source?.id ?? l.source;
+      const t = l.target?.id ?? l.target;
+      if (selectedIds.has(s)) connected.add(t);
+      if (selectedIds.has(t)) connected.add(s);
+    });
+  }
+
+  nodesSelection.select("circle")
+    .attr("fill",         d => selectedIds.has(d.id) ? "#ffffff" : getBaseColor(d))
+    .attr("stroke",       d => selectedIds.has(d.id) ? "#06b6d4" : "#fff")
+    .attr("stroke-width", d => selectedIds.has(d.id) ? 4 : 1.5)
+    .attr("opacity",      d => {
+      if (selectedIds.size === 0) return 1;
+      if (selectedIds.has(d.id)) return 1;      // selected = full
+      if (connected.has(d.id))   return 0.6;   // connected = subtle
+      return 0.12;                               // unrelated = faded
+    });
+
+  linksSelection.attr("stroke-opacity", l => {
+    if (selectedIds.size === 0) return 0.25;
+    const s = l.source?.id ?? l.source;
+    const t = l.target?.id ?? l.target;
+    return (selectedIds.has(s) || selectedIds.has(t)) ? 0.8 : 0.03;
+  });
+
+  updateSelectionStatus();
+}
+
+function selectAllNodes() {
+  selectedIds = new Set(Object.keys(window.nodeDataById || {}));
+  window.selectedNodes = selectedIds;
+  applySelection();
+}
+
+function clearNodeSelection() {
+  selectedIds.clear();
+  highlightedIds.clear(); // 🔥 FIX: remove gold-ring state
+
+  // remove rings from DOM immediately
+  if (nodesSelection) {
+    nodesSelection.selectAll(".gold-ring").remove();
+  }
+
+  window.selectedNodes = selectedIds;
+  applySelection();
 }
 
 function updateSelectionStatus() {
   const el = document.getElementById("selected-nodes");
   if (!el) return;
+
   if (selectedIds.size === 0) {
-    el.innerHTML = "No nodes selected";
+    el.innerHTML = `
+      <span style="font-size:12px;color:#888">
+        Click a node · shift+click to add more ·
+        only <span style="color:#06b6d4;font-weight:600">cyan-outlined</span>
+        nodes will be queried
+      </span>`;
     return;
   }
+
   el.innerHTML = `
-    <b>Selected (${selectedIds.size})</b><br>
+    <span style="font-size:12px;font-weight:600;color:#06b6d4">
+      ${selectedIds.size} paper${selectedIds.size > 1 ? "s" : ""} selected — only these will be queried
+    </span><br>
     ${[...selectedIds].map(id => {
       const n = window.nodeDataById?.[id];
-      return `<div style="font-size:11px">${n ? n.title : id}</div>`;
+      return `<div style="font-size:11px;color:#444;margin-top:3px">
+        <span style="display:inline-block;width:9px;height:9px;border-radius:50%;
+          background:white;border:2px solid #06b6d4;margin-right:5px;
+          vertical-align:middle"></span>${n ? n.title : id}
+      </div>`;
     }).join("")}
   `;
 }
 
-function highlightNodes(paperIds) {
-  d3.selectAll(".node circle")
-    .attr("stroke",       d => paperIds.includes(d.id) ? "#FFD700" : getStroke(d))
-    .attr("stroke-width", d => paperIds.includes(d.id) ? 4 : 1.5);
-}
+function highlightNodes(ids) {
+  if (!ids?.length || !nodesSelection) return;
 
-function selectAllNodes() {
-  selectedIds.clear();
-  d3.selectAll(".node").each(function(d) {
-    selectedIds.add(d.id);
-    d3.select(this).select("circle")
-      .attr("fill",         "#D85A30")
-      .attr("stroke",       "#993C1D")
-      .attr("stroke-width", 2.5);
+  highlightedIds = new Set(ids);
+
+  //  remove old rings
+  nodesSelection.selectAll(".gold-ring").remove();
+
+  // add ring as separate circle (THIS is the fix)
+  nodesSelection.each(function(d) {
+
+    if (!highlightedIds.has(d.id)) return;
+
+    const node = d3.select(this);
+
+    node.append("circle")
+      .attr("class", "gold-ring")
+      .attr("r", function() {
+        const base = node.select("circle").attr("r");
+        return +base + 6;
+      })
+      .attr("fill", "none")
+      .attr("stroke", "#FFD700")
+      .attr("stroke-width", 3)
+      .attr("pointer-events", "none");
   });
-  window.selectedNodes = selectedIds;
-  updateSelectionStatus();
-}
-
-function clearNodeSelection() {
-  selectedIds.clear();
-  d3.selectAll(".node circle")
-    .attr("fill",         d => getColor(d))
-    .attr("stroke",       d => getStroke(d))
-    .attr("stroke-width", 1.5);
-  window.selectedNodes = selectedIds;
-  updateSelectionStatus();
 }
 
 window.addEventListener("resize", renderGraph);
