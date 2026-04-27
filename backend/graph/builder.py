@@ -11,6 +11,8 @@ def build_graph(papers, reference_map):
         G.add_node(
             paper["id"],
             title=paper.get("title", ""),
+            abstract=paper.get("abstract", ""),
+            relevance_score=paper.get("relevance_score", 0),
             year=int(paper.get("year") or 2024),
             citations=paper.get("citations", 0),
             arxiv_id=paper.get("arxiv_id", ""),

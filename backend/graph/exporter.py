@@ -9,11 +9,12 @@ def export_graph(G, run_path):
         nodes.append({
             "id":        node,
             "title":     data.get("title", ""),
+            "abstract":  data.get("abstract", ""),
             "year":      data.get("year", 2024),
-            "pagerank":  data.get("pagerank", 0),
             "role":      data.get("role", "peripheral"),
             "citations": data.get("citations", 0),
             "arxiv_id":  data.get("arxiv_id", ""),
+            "relevance_score": data.get("relevance_score", 0),
         })
 
     for source, target in G.edges():

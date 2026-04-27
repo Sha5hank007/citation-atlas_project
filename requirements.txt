@@ -1,9 +1,11 @@
 fastapi
 uvicorn
 requests
+aiohttp
 python-dotenv
 networkx
 pymupdf
 tqdm
 chromadb
 sentence-transformers
+numpy

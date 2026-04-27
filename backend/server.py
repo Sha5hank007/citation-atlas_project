@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi import Body
 from pydantic import BaseModel
 
-from backend.main import run_pipeline
+from backend.main import run_pipeline_async
 from backend.rag.query import query_db
 from backend.llm.client import get_llm
 
@@ -32,8 +32,9 @@ status = {
     "message": ""
 }
 
-def update_status(msg):
+def update_status(msg, step="running"):
     status["message"] = msg
+    status["step"] = step
 
 # serve frontend folder
 app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")
@@ -47,7 +48,7 @@ def home():
 @app.get("/graph")
 def graph():
     if not current_run:
-        return {"nodes": [], "links": []}
+         return {"error": "no active run"}
 
     path = f"runs/{current_run}/graph.json"
     if not os.path.exists(path):
@@ -62,30 +63,55 @@ def get_status():
     return status
 
 
+from backend.runs.run_manager import create_run
+
 @app.post("/run_pipeline")
 def run(topic: str):
 
-    def task():
+    
+    run_id, run_path = create_run(topic)
+
+    async def task():
         global current_run, current_vector_db
 
-        status["step"] = "running"
-        status["message"] = "Starting pipeline"
+        try:
+            status["step"] = "running"
+            status["message"] = "Starting pipeline"
 
-        run_id, run_path = run_pipeline(topic, update_status)
+            await run_pipeline_async(topic, update_status, run_id, run_path)
 
-        # ✅ SET CURRENT RUN AFTER PIPELINE
-        current_run = run_id
-        current_vector_db = f"{run_path}/vector_db"
+            current_run = run_id
+            current_vector_db = f"{run_path}/vector_db"
 
-        status["step"] = "complete"
-        status["message"] = "Graph ready"
+            status["step"] = "complete"
+            status["message"] = "Graph ready"
 
-    thread = threading.Thread(target=task)
+        except Exception as e:
+            print("Pipeline error:", e)
+            status["step"] = "error"
+            status["message"] = str(e)
+        
+
+    import asyncio
+    
+    def run_async_task():
+        asyncio.run(task())
+    
+    thread = threading.Thread(target=run_async_task)
     thread.start()
 
-    return {"message": "Pipeline started"}
+    # return run_id to frontend
+    return {"run_id": run_id}
 
+@app.get("/summary")
+def get_summary(run_id: str):
+    path = f"runs/{run_id}/summary.json"
 
+    if not os.path.exists(path):
+        return {"summary": ""}
+
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 @app.post("/ask")
 def ask(payload: dict = Body(...)):
@@ -144,7 +170,6 @@ def list_runs():
         info_path = f"runs/{r}/run_info.json"
 
         if os.path.exists(info_path):
-
             with open(info_path) as f:
                 info = json.load(f)
 
@@ -152,13 +177,14 @@ def list_runs():
                 "id": r,
                 "label": info.get("topic", r) + " (" + r.split("__")[-1] + ")"
             })
-
         else:
             runs.append({
                 "id": r,
                 "label": r
             })
 
+    runs.sort(key=lambda x: x["id"], reverse=True)
+    
     return runs
 
 
