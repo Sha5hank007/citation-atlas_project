@@ -108,7 +108,7 @@ Frontend (D3.js) + QA
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/<your-username>/citation-atlas.git
+git clone https://github.com/Sha5hank007/citation-atlas.git
 cd citation-atlas_project
 ```
 
