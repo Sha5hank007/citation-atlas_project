@@ -148,6 +148,8 @@ Question:
 """
 
     answer = llm.generate(prompt)
+    if not answer or not answer.strip():
+        answer = "LLM failed to generate a response. Please try again."
 
     source_papers = list(set([
         m.get("paper_id") for m in metas if m and m.get("paper_id")

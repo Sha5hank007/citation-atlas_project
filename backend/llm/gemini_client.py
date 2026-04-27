@@ -10,14 +10,21 @@ class GeminiClient:
 
         payload = {
             "contents": [
-                {
-                    "parts": [{"text": prompt}]
-                }
+                {"parts": [{"text": prompt}]}
             ]
         }
 
-        r = requests.post(url, json=payload)
+        try:
+            r = requests.post(url, json=payload, timeout=20)
 
-        data = r.json()
+            if r.status_code != 200:
+                print("Gemini HTTP ERROR:", r.status_code, r.text)
+                return ""
 
-        return data["candidates"][0]["content"]["parts"][0]["text"]
+            data = r.json()
+
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+
+        except Exception as e:
+            print("Gemini ERROR:", str(e))
+            return ""

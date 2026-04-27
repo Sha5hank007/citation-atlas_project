@@ -9,7 +9,8 @@ class OpenRouterClient:
         url = "https://openrouter.ai/api/v1/chat/completions"
 
         headers = {
-            "Authorization": f"Bearer {OPENROUTER_API_KEY}"
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json"
         }
 
         payload = {
@@ -19,6 +20,17 @@ class OpenRouterClient:
             ]
         }
 
-        r = requests.post(url, headers=headers, json=payload)
+        try:
+            r = requests.post(url, headers=headers, json=payload, timeout=20)
 
-        return r.json()["choices"][0]["message"]["content"]
+            if r.status_code != 200:
+                print("OpenRouter HTTP ERROR:", r.status_code, r.text)
+                return ""
+
+            data = r.json()
+
+            return data["choices"][0]["message"]["content"]
+
+        except Exception as e:
+            print("OpenRouter ERROR:", str(e))
+            return ""
