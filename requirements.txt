@@ -8,4 +8,5 @@ pymupdf
 tqdm
 chromadb
 sentence-transformers
+Pillow
 numpy
